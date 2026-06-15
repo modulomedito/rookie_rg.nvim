@@ -199,6 +199,25 @@ local function cycle_quickfix(step)
   jump_quickfix(cmd, qf.items[target_idx])
 end
 
+local function is_quickfix_open()
+  for _, wininfo in ipairs(vim.fn.getwininfo()) do
+    if wininfo.quickfix == 1 and wininfo.loclist ~= 1 then
+      return true
+    end
+  end
+
+  return false
+end
+
+function M.toggle_quickfix()
+  if is_quickfix_open() then
+    vim.cmd.cclose()
+    return
+  end
+
+  vim.cmd.copen()
+end
+
 function M.quickfix_prev()
   cycle_quickfix(-1)
 end

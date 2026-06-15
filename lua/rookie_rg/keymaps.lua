@@ -28,8 +28,8 @@ function M.setup()
     desc = "Close quickfix list",
   }))
 
-  vim.keymap.set("n", "<F8>", "<Cmd>copen<CR>", vim.tbl_extend("force", opts, {
-    desc = "Open quickfix list",
+  vim.keymap.set("n", "<F8>", core.toggle_quickfix, vim.tbl_extend("force", opts, {
+    desc = "Toggle quickfix list",
   }))
 end
 
