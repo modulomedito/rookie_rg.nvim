@@ -138,10 +138,85 @@ local function format_live_grep_flags(flags)
   })
 end
 
-local function render_live_grep_prompt(pattern)
-  local flags = get_live_grep_flags()
-  vim.cmd.redraw()
-  vim.api.nvim_echo({ { "Grep Pattern " .. format_live_grep_flags(flags) .. ": " .. pattern } }, false, {})
+local function open_live_grep_prompt()
+  local prev_win = vim.api.nvim_get_current_win()
+  local buf = vim.api.nvim_create_buf(false, true)
+
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].modifiable = false
+
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    row = 1,
+    col = 1,
+    width = 40,
+    height = 2,
+    noautocmd = true,
+  })
+
+  vim.wo[win].wrap = false
+  vim.wo[win].cursorline = false
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = "no"
+  vim.wo[win].foldcolumn = "0"
+  vim.wo[win].spell = false
+
+  return {
+    buf = buf,
+    win = win,
+    prev_win = prev_win,
+  }
+end
+
+local function close_live_grep_prompt(prompt)
+  if prompt == nil then
+    return
+  end
+
+  if prompt.win and vim.api.nvim_win_is_valid(prompt.win) then
+    vim.api.nvim_win_close(prompt.win, true)
+  elseif prompt.buf and vim.api.nvim_buf_is_valid(prompt.buf) then
+    vim.api.nvim_buf_delete(prompt.buf, { force = true })
+  end
+
+  if prompt.prev_win and vim.api.nvim_win_is_valid(prompt.prev_win) then
+    pcall(vim.api.nvim_set_current_win, prompt.prev_win)
+  end
+end
+
+local function render_live_grep_prompt(prompt, pattern, flags)
+  local lines = {
+    "Grep Pattern " .. format_live_grep_flags(flags),
+    pattern,
+  }
+  local width = 36
+
+  for _, line in ipairs(lines) do
+    width = math.max(width, vim.fn.strdisplaywidth(line) + 2)
+  end
+
+  width = math.min(width, math.max(vim.o.columns - 4, 20))
+
+  local config = {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    width = width,
+    height = #lines,
+    row = math.max(1, math.floor((vim.o.lines - #lines) * 0.2)),
+    col = math.max(0, math.floor((vim.o.columns - width) / 2)),
+  }
+
+  vim.api.nvim_win_set_config(prompt.win, config)
+  vim.bo[prompt.buf].modifiable = true
+  vim.api.nvim_buf_set_lines(prompt.buf, 0, -1, false, lines)
+  vim.bo[prompt.buf].modifiable = false
+  vim.api.nvim_win_set_cursor(prompt.win, { 2, #pattern })
 end
 
 local function trim_last_char(text)
@@ -211,39 +286,48 @@ end
 local function prompt_live_grep()
   local flags = get_live_grep_flags()
   local pattern = ""
+  local prompt = open_live_grep_prompt()
 
-  render_live_grep_prompt(pattern)
+  local ok, result = pcall(function()
+    render_live_grep_prompt(prompt, pattern, flags)
 
-  while true do
-    local key = read_prompt_key()
-    local action = get_prompt_key_action(key)
+    while true do
+      local key = read_prompt_key()
+      local action = get_prompt_key_action(key)
 
-    if action == "submit" then
-      vim.cmd.redraw()
-      return pattern
+      if action == "submit" then
+        return pattern
+      end
+
+      if action == "cancel" then
+        return nil
+      end
+
+      if action == "toggle_case" then
+        flags.case_sensitive = not flags.case_sensitive
+      elseif action == "toggle_whole_word" then
+        flags.whole_word = not flags.whole_word
+      elseif action == "toggle_regex" then
+        flags.regex = not flags.regex
+      elseif action == "backspace" then
+        pattern = trim_last_char(pattern)
+      elseif action == "clear" then
+        pattern = ""
+      elseif action == "append" then
+        pattern = pattern .. key
+      end
+
+      render_live_grep_prompt(prompt, pattern, flags)
     end
+  end)
 
-    if action == "cancel" then
-      vim.cmd.redraw()
-      return nil
-    end
+  close_live_grep_prompt(prompt)
 
-    if action == "toggle_case" then
-      flags.case_sensitive = not flags.case_sensitive
-    elseif action == "toggle_whole_word" then
-      flags.whole_word = not flags.whole_word
-    elseif action == "toggle_regex" then
-      flags.regex = not flags.regex
-    elseif action == "backspace" then
-      pattern = trim_last_char(pattern)
-    elseif action == "clear" then
-      pattern = ""
-    elseif action == "append" then
-      pattern = pattern .. key
-    end
-
-    render_live_grep_prompt(pattern)
+  if not ok then
+    error(result)
   end
+
+  return result
 end
 
 function M.live_grep()
