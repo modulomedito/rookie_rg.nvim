@@ -816,6 +816,22 @@ local function is_file_search_quickfix(title)
   return type(title) == "string" and title:match("^Files")
 end
 
+local function is_buffer_quickfix(title)
+  return title == "Buffers"
+end
+
+local function should_show_buffer(bufinfo)
+  if vim.bo[bufinfo.bufnr].buftype == "quickfix" then
+    return false
+  end
+
+  if (bufinfo.name == nil or bufinfo.name == "") and bufinfo.changed ~= 1 then
+    return false
+  end
+
+  return true
+end
+
 local function is_quickfix_open()
   for _, wininfo in ipairs(vim.fn.getwininfo()) do
     if wininfo.quickfix == 1 and wininfo.loclist ~= 1 then
@@ -873,7 +889,7 @@ function M.show_buffers()
 
   local items = {}
   for _, bufinfo in ipairs(buffers) do
-    if vim.bo[bufinfo.bufnr].buftype ~= "quickfix" then
+    if should_show_buffer(bufinfo) then
       local lnum, col = get_buffer_position(bufinfo)
 
       table.insert(items, {
@@ -925,6 +941,8 @@ function M.quickfix_enter()
 
   if is_file_search_quickfix(qf.title) then
     vim.cmd.cclose()
+  elseif is_buffer_quickfix(qf.title) then
+    M.show_buffers()
   end
 end
 
