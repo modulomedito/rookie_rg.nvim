@@ -20,6 +20,14 @@ local function get_live_grep_flags()
   return flags
 end
 
+local function set_live_grep_flags(flags)
+  vim.g.rookie_rg_live_grep_flags = {
+    case_sensitive = flags.case_sensitive == true,
+    whole_word = flags.whole_word == true,
+    regex = flags.regex == true,
+  }
+end
+
 local function get_case_prefix(case_sensitive)
   if case_sensitive == nil then
     return ""
@@ -286,7 +294,7 @@ local function get_prompt_key_action(key)
 end
 
 local function prompt_live_grep()
-  local flags = get_live_grep_flags()
+  local flags = vim.deepcopy(get_live_grep_flags())
   local pattern = ""
   local prompt = open_live_grep_prompt()
 
@@ -302,7 +310,11 @@ local function prompt_live_grep()
       local action = get_prompt_key_action(key)
 
       if action == "submit" then
-        return pattern
+        set_live_grep_flags(flags)
+        return {
+          pattern = pattern,
+          flags = vim.deepcopy(flags),
+        }
       end
 
       if action == "cancel" then
@@ -311,10 +323,13 @@ local function prompt_live_grep()
 
       if action == "toggle_case" then
         flags.case_sensitive = not flags.case_sensitive
+        set_live_grep_flags(flags)
       elseif action == "toggle_whole_word" then
         flags.whole_word = not flags.whole_word
+        set_live_grep_flags(flags)
       elseif action == "toggle_regex" then
         flags.regex = not flags.regex
+        set_live_grep_flags(flags)
       elseif action == "backspace" then
         pattern = trim_last_char(pattern)
       elseif action == "clear" then
@@ -398,12 +413,13 @@ end
 
 function M.live_grep()
   local curr_win = vim.api.nvim_get_current_win()
-  local user_input = prompt_live_grep()
-  if user_input == nil or user_input == "" then
+  local prompt_result = prompt_live_grep()
+  if prompt_result == nil or prompt_result.pattern == "" then
     return
   end
 
-  local flags = vim.deepcopy(get_live_grep_flags())
+  local user_input = prompt_result.pattern
+  local flags = prompt_result.flags
 
   if execute_grep(build_grep_args(user_input, {
     case_mode = flags.case_sensitive and "sensitive" or "insensitive",
