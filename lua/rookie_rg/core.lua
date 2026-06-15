@@ -955,7 +955,9 @@ end
 
 function M.quickfix_enter()
   local qf = vim.fn.getqflist({ idx = 0, items = 1, size = 0, title = 1 })
-  if qf.size == 0 or qf.idx < 1 or qf.idx > #qf.items then
+  local selected_idx = vim.api.nvim_win_get_cursor(0)[1]
+
+  if qf.size == 0 or selected_idx < 1 or selected_idx > #qf.items then
     return
   end
 
@@ -964,7 +966,7 @@ function M.quickfix_enter()
     pcall(vim.api.nvim_set_current_win, target_win)
   end
 
-  jump_quickfix("cc", qf.items[qf.idx])
+  jump_quickfix("cc " .. selected_idx, qf.items[selected_idx])
 
   if is_file_search_quickfix(qf.title) then
     vim.cmd.cclose()
