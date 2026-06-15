@@ -593,6 +593,57 @@ local function is_quickfix_open()
   return false
 end
 
+local function get_buffer_display_name(bufinfo)
+  if bufinfo.name ~= nil and bufinfo.name ~= "" then
+    return vim.fn.fnamemodify(bufinfo.name, ":.")
+  end
+
+  return "[No Name]"
+end
+
+function M.show_buffers()
+  local prev_win = vim.api.nvim_get_current_win()
+  local buffers = vim.fn.getbufinfo({ buflisted = 1 })
+
+  table.sort(buffers, function(a, b)
+    if a.lastused ~= b.lastused then
+      return a.lastused > b.lastused
+    end
+
+    return a.bufnr < b.bufnr
+  end)
+
+  local items = {}
+  for _, bufinfo in ipairs(buffers) do
+    table.insert(items, {
+      bufnr = bufinfo.bufnr,
+      lnum = 1,
+      col = 1,
+      text = string.format(
+        "%s %s",
+        bufinfo.changed == 1 and "[+]" or "[ ]",
+        get_buffer_display_name(bufinfo)
+      ),
+    })
+  end
+
+  if vim.tbl_isempty(items) then
+    vim.api.nvim_echo({ { "No listed buffers found." } }, false, {})
+    return
+  end
+
+  vim.fn.setqflist({}, "r", {
+    title = "Buffers",
+    items = items,
+  })
+
+  vim.cmd.copen()
+  if prev_win and vim.api.nvim_win_is_valid(prev_win) then
+    pcall(vim.api.nvim_set_current_win, prev_win)
+  end
+  vim.cmd.redraw()
+end
+
 function M.toggle_quickfix()
   if is_quickfix_open() then
     vim.cmd.cclose()
