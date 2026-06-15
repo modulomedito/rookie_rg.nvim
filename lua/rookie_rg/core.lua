@@ -217,6 +217,7 @@ local function render_live_grep_prompt(prompt, pattern, flags)
   vim.api.nvim_buf_set_lines(prompt.buf, 0, -1, false, lines)
   vim.bo[prompt.buf].modifiable = false
   vim.api.nvim_win_set_cursor(prompt.win, { 2, #pattern })
+  vim.cmd.redraw()
 end
 
 local function trim_last_char(text)
@@ -234,7 +235,8 @@ local function read_prompt_key()
     return key
   end
 
-  if type(key) == "string" and key:find("Keyboard interrupt", 1, true) then
+  local err = tostring(key)
+  if err:find("Keyboard interrupt", 1, true) or err:find("Interrupted", 1, true) then
     return "^C"
   end
 
@@ -248,7 +250,7 @@ local function get_prompt_key_action(key)
     return "append"
   end
 
-  if translated_key == "^M" then
+  if translated_key == "^M" or translated_key == "<CR>" or translated_key == "<Enter>" then
     return "submit"
   end
 
@@ -268,7 +270,7 @@ local function get_prompt_key_action(key)
     return "toggle_regex"
   end
 
-  if translated_key == "<BS>" or translated_key == "^H" then
+  if translated_key == "<BS>" or translated_key == "^H" or translated_key == "<Backspace>" then
     return "backspace"
   end
 
@@ -293,6 +295,10 @@ local function prompt_live_grep()
 
     while true do
       local key = read_prompt_key()
+      if key == "" then
+        -- This shouldn't happen with getcharstr(), but just in case to avoid infinite loop
+        break
+      end
       local action = get_prompt_key_action(key)
 
       if action == "submit" then
