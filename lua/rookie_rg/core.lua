@@ -4,6 +4,10 @@ local function set_search_register(pattern)
   vim.fn.setreg("/", "\\V" .. pattern)
 end
 
+local function set_search_register_whole_word(pattern)
+  vim.fn.setreg("/", "\\V\\<" .. vim.fn.escape(pattern, "\\") .. "\\>")
+end
+
 local function refresh_search_highlight()
   pcall(vim.cmd.normal, { args = { "nN" }, bang = true })
 end
@@ -73,7 +77,7 @@ function M.global_grep()
   end
 
   execute_grep("-w " .. vim.fn.shellescape(word))
-  set_search_register(word)
+  set_search_register_whole_word(word)
   refresh_search_highlight()
 
   local qflist = vim.fn.getqflist()
