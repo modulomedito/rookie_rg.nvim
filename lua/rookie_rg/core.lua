@@ -524,7 +524,6 @@ local function open_file_quickfix(files, query)
     items = items,
   })
   vim.cmd.copen()
-  vim.cmd("wincmd p")
   vim.cmd.redraw()
   return true
 end
@@ -813,6 +812,10 @@ local function cycle_quickfix(step)
   jump_quickfix(cmd, qf.items[target_idx])
 end
 
+local function is_file_search_quickfix(title)
+  return type(title) == "string" and title:match("^Files")
+end
+
 local function is_quickfix_open()
   for _, wininfo in ipairs(vim.fn.getwininfo()) do
     if wininfo.quickfix == 1 and wininfo.loclist ~= 1 then
@@ -910,6 +913,19 @@ function M.toggle_quickfix()
   end
 
   vim.cmd.copen()
+end
+
+function M.quickfix_enter()
+  local qf = vim.fn.getqflist({ idx = 0, items = 1, size = 0, title = 1 })
+  if qf.size == 0 or qf.idx < 1 or qf.idx > #qf.items then
+    return
+  end
+
+  jump_quickfix("cc", qf.items[qf.idx])
+
+  if is_file_search_quickfix(qf.title) then
+    vim.cmd.cclose()
+  end
 end
 
 function M.quickfix_prev()
