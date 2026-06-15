@@ -1,11 +1,63 @@
 local M = {}
 
-local function set_search_register(pattern)
-  vim.fn.setreg("/", "\\V" .. pattern)
+local default_live_grep_flags = {
+  case_sensitive = false,
+  whole_word = false,
+  regex = false,
+}
+
+local function get_live_grep_flags()
+  local flags = vim.g.rookie_rg_live_grep_flags
+  if type(flags) ~= "table" then
+    flags = vim.deepcopy(default_live_grep_flags)
+    vim.g.rookie_rg_live_grep_flags = flags
+    return flags
+  end
+
+  flags.case_sensitive = flags.case_sensitive == true
+  flags.whole_word = flags.whole_word == true
+  flags.regex = flags.regex == true
+  return flags
 end
 
-local function set_search_register_whole_word(pattern)
-  vim.fn.setreg("/", "\\V\\<" .. vim.fn.escape(pattern, "\\") .. "\\>")
+local function get_case_prefix(case_sensitive)
+  if case_sensitive == nil then
+    return ""
+  end
+
+  return case_sensitive and "\\C" or "\\c"
+end
+
+local function set_search_register(pattern, case_sensitive)
+  vim.fn.setreg("/", get_case_prefix(case_sensitive) .. "\\V" .. pattern)
+end
+
+local function set_search_register_whole_word(pattern, case_sensitive)
+  vim.fn.setreg("/", get_case_prefix(case_sensitive) .. "\\V\\<" .. vim.fn.escape(pattern, "\\") .. "\\>")
+end
+
+local function set_regex_search_register(pattern, case_sensitive, whole_word)
+  local prefix = get_case_prefix(case_sensitive)
+  if whole_word then
+    vim.fn.setreg("/", prefix .. "\\<" .. pattern .. "\\>")
+    return
+  end
+
+  vim.fn.setreg("/", prefix .. pattern)
+end
+
+local function set_live_grep_search_register(pattern, flags)
+  if flags.regex then
+    set_regex_search_register(pattern, flags.case_sensitive, flags.whole_word)
+    return
+  end
+
+  if flags.whole_word then
+    set_search_register_whole_word(pattern, flags.case_sensitive)
+    return
+  end
+
+  set_search_register(pattern, flags.case_sensitive)
 end
 
 local function refresh_search_highlight()
@@ -33,8 +85,37 @@ local function get_visual_selection()
   return table.concat(lines, "\n")
 end
 
+local function build_grep_args(pattern, opts)
+  opts = opts or {}
+
+  local args = {}
+  local case_mode = opts.case_mode
+
+  if case_mode == "sensitive" then
+    table.insert(args, "-s")
+  elseif case_mode == "insensitive" then
+    table.insert(args, "-i")
+  elseif case_mode == "smart" then
+    table.insert(args, "-S")
+  end
+
+  if opts.whole_word then
+    table.insert(args, "-w")
+  end
+
+  if opts.fixed_strings then
+    table.insert(args, "-F")
+  end
+
+  table.insert(args, "--")
+  table.insert(args, vim.fn.shellescape(pattern))
+  table.insert(args, vim.fn.shellescape("."))
+
+  return args
+end
+
 local function execute_grep(args)
-  vim.cmd("silent! grep! " .. args .. " .")
+  vim.cmd("silent! grep! " .. table.concat(args, " "))
 
   if #vim.fn.getqflist() > 0 then
     vim.cmd.copen()
@@ -49,14 +130,97 @@ local function execute_grep(args)
   return false
 end
 
+local function format_live_grep_flags(flags)
+  return table.concat({
+    flags.case_sensitive and "[C]" or "C",
+    flags.whole_word and "[W]" or "W",
+    flags.regex and "[R]" or "R",
+  })
+end
+
+local function render_live_grep_prompt(pattern)
+  local flags = get_live_grep_flags()
+  vim.cmd.redraw()
+  vim.api.nvim_echo({ { "Grep Pattern " .. format_live_grep_flags(flags) .. ": " .. pattern } }, false, {})
+end
+
+local function trim_last_char(text)
+  local char_count = vim.fn.strchars(text)
+  if char_count == 0 then
+    return ""
+  end
+
+  return vim.fn.strcharpart(text, 0, char_count - 1)
+end
+
+local function read_prompt_key()
+  local ok, key = pcall(vim.fn.getcharstr)
+  if ok then
+    return key
+  end
+
+  if type(key) == "string" and key:find("Keyboard interrupt", 1, true) then
+    return vim.keycode("<C-c>")
+  end
+
+  error(key)
+end
+
+local function prompt_live_grep()
+  local flags = get_live_grep_flags()
+  local pattern = ""
+
+  render_live_grep_prompt(pattern)
+
+  while true do
+    local key = read_prompt_key()
+
+    if key == vim.keycode("<CR>") then
+      vim.cmd.redraw()
+      return pattern
+    end
+
+    if key == vim.keycode("<Esc>") then
+      vim.cmd.redraw()
+      return nil
+    end
+
+    if key == vim.keycode("<C-c>") then
+      flags.case_sensitive = not flags.case_sensitive
+    elseif key == vim.keycode("<C-w>") then
+      flags.whole_word = not flags.whole_word
+    elseif key == vim.keycode("<C-r>") then
+      flags.regex = not flags.regex
+    elseif key == vim.keycode("<BS>") or key == vim.keycode("<C-h>") then
+      pattern = trim_last_char(pattern)
+    elseif key == vim.keycode("<C-u>") then
+      pattern = ""
+    else
+      local translated_key = vim.fn.keytrans(key)
+      if not translated_key:match("^<.*>$") and not translated_key:match("^%^[A-Z]$") then
+        pattern = pattern .. key
+      end
+    end
+
+    render_live_grep_prompt(pattern)
+  end
+end
+
 function M.live_grep()
-  local user_input = vim.fn.input("Grep Pattern: ")
-  if user_input == "" then
+  local user_input = prompt_live_grep()
+  if user_input == nil or user_input == "" then
     return
   end
 
-  execute_grep(user_input)
-  set_search_register(user_input)
+  local flags = vim.deepcopy(get_live_grep_flags())
+
+  execute_grep(build_grep_args(user_input, {
+    case_mode = flags.case_sensitive and "sensitive" or "insensitive",
+    whole_word = flags.whole_word,
+    fixed_strings = not flags.regex,
+  }))
+  set_live_grep_search_register(user_input, flags)
+  refresh_search_highlight()
 end
 
 function M.global_grep()
@@ -76,7 +240,11 @@ function M.global_grep()
     curr_col = match[2] + 1
   end
 
-  execute_grep("-w " .. vim.fn.shellescape(word))
+  execute_grep(build_grep_args(word, {
+    case_mode = "smart",
+    whole_word = true,
+    fixed_strings = true,
+  }))
   set_search_register_whole_word(word)
   refresh_search_highlight()
 
@@ -118,7 +286,10 @@ function M.visual_grep()
     return
   end
 
-  execute_grep("-F " .. vim.fn.shellescape(selection))
+  execute_grep(build_grep_args(selection, {
+    case_mode = "smart",
+    fixed_strings = true,
+  }))
   set_search_register(selection)
   refresh_search_highlight()
 end
