@@ -842,6 +842,28 @@ local function is_quickfix_open()
   return false
 end
 
+local function find_non_quickfix_window()
+  local alternate_winnr = vim.fn.winnr("#")
+  if alternate_winnr > 0 then
+    local alternate_win = vim.fn.win_getid(alternate_winnr)
+    if alternate_win > 0 and vim.api.nvim_win_is_valid(alternate_win) then
+      local wininfo = vim.fn.getwininfo(alternate_win)[1]
+      if wininfo and wininfo.quickfix ~= 1 then
+        return alternate_win
+      end
+    end
+  end
+
+  local current_win = vim.api.nvim_get_current_win()
+  for _, wininfo in ipairs(vim.fn.getwininfo()) do
+    if wininfo.winid ~= current_win and wininfo.quickfix ~= 1 and wininfo.loclist ~= 1 then
+      return wininfo.winid
+    end
+  end
+
+  return nil
+end
+
 local function get_buffer_display_name(bufinfo)
   if bufinfo.name ~= nil and bufinfo.name ~= "" then
     return vim.fn.fnamemodify(bufinfo.name, ":.")
@@ -935,6 +957,11 @@ function M.quickfix_enter()
   local qf = vim.fn.getqflist({ idx = 0, items = 1, size = 0, title = 1 })
   if qf.size == 0 or qf.idx < 1 or qf.idx > #qf.items then
     return
+  end
+
+  local target_win = find_non_quickfix_window()
+  if target_win and vim.api.nvim_win_is_valid(target_win) then
+    pcall(vim.api.nvim_set_current_win, target_win)
   end
 
   jump_quickfix("cc", qf.items[qf.idx])
