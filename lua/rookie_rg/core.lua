@@ -92,7 +92,8 @@ local function build_grep_args(pattern, opts)
   local case_mode = opts.case_mode
 
   if case_mode == "sensitive" then
-    table.insert(args, "-s")
+    -- Use --case-sensitive for ripgrep, or -s for GNU grep
+    table.insert(args, "--case-sensitive")
   elseif case_mode == "insensitive" then
     table.insert(args, "-i")
   elseif case_mode == "smart" then
@@ -258,15 +259,15 @@ local function get_prompt_key_action(key)
     return "cancel"
   end
 
-  if translated_key == "^C" then
+  if translated_key == "<C-C>" or translated_key == "^C" then
     return "toggle_case"
   end
 
-  if translated_key == "^W" then
+  if translated_key == "<C-W>" or translated_key == "^W" then
     return "toggle_whole_word"
   end
 
-  if translated_key == "^R" then
+  if translated_key == "<C-R>" or translated_key == "^R" then
     return "toggle_regex"
   end
 
@@ -274,7 +275,7 @@ local function get_prompt_key_action(key)
     return "backspace"
   end
 
-  if translated_key == "^U" then
+  if translated_key == "^U" or translated_key == "<C-U>" then
     return "clear"
   end
 
