@@ -92,7 +92,10 @@ local function build_grep_args(pattern, opts)
   local case_mode = opts.case_mode
 
   if case_mode == "sensitive" then
-    -- Use --case-sensitive for ripgrep, or -s for GNU grep
+    -- ripgrep uses --case-sensitive
+    -- git grep uses -s, but also supports --case-sensitive
+    -- grep uses -s for silent, but --case-sensitive is generally not a standard POSIX flag
+    -- We'll use --case-sensitive as it's the most common for modern tools like rg
     table.insert(args, "--case-sensitive")
   elseif case_mode == "insensitive" then
     table.insert(args, "-i")
@@ -116,6 +119,8 @@ local function build_grep_args(pattern, opts)
 end
 
 local function execute_grep(args)
+  -- Use -s to avoid error messages about non-existent files or directories
+  -- However, we must ensure it doesn't conflict with our case-sensitive flags
   vim.cmd("silent! grep! " .. table.concat(args, " "))
 
   if #vim.fn.getqflist() > 0 then
@@ -337,7 +342,68 @@ local function prompt_live_grep()
   return result
 end
 
+local function prioritize_current_line(pattern, flags)
+  local curr_buf = vim.fn.bufnr("%")
+  local curr_lnum = vim.fn.line(".")
+  local curr_col = vim.fn.col(".")
+  local line_text = vim.fn.getline(".")
+
+  local qflist = vim.fn.getqflist()
+  if vim.tbl_isempty(qflist) then
+    return
+  end
+
+  local search_pat
+  if flags.regex then
+    search_pat = pattern
+  else
+    search_pat = "\\V" .. vim.fn.escape(pattern, "\\")
+  end
+
+  if flags.whole_word then
+    search_pat = "\\<" .. search_pat .. "\\>"
+  end
+
+  local case_prefix = get_case_prefix(flags.case_sensitive)
+  search_pat = case_prefix .. search_pat
+
+  local match = vim.fn.matchstrpos(line_text, search_pat, curr_col - 1)
+  if match[2] < 0 then
+    -- Try matching from start of line if not found at cursor
+    match = vim.fn.matchstrpos(line_text, search_pat, 0)
+  end
+
+  local target_col = match[2] >= 0 and (match[2] + 1) or nil
+  local idx = nil
+  local best_idx = nil
+  local best_dist = nil
+
+  for i, item in ipairs(qflist) do
+    if item.bufnr == curr_buf and item.lnum == curr_lnum then
+      if target_col and (item.col or -1) == target_col then
+        idx = i
+        break
+      end
+
+      local dist = target_col and math.abs((item.col or 0) - target_col) or 0
+      if best_dist == nil or dist < best_dist then
+        best_dist = dist
+        best_idx = i
+      end
+    end
+  end
+
+  idx = idx or best_idx
+  if idx and idx > 1 then
+    local item = table.remove(qflist, idx)
+    table.insert(qflist, 1, item)
+    vim.fn.setqflist({}, "r", { items = qflist })
+    vim.cmd.crewind() -- Move to the first item
+  end
+end
+
 function M.live_grep()
+  local curr_win = vim.api.nvim_get_current_win()
   local user_input = prompt_live_grep()
   if user_input == nil or user_input == "" then
     return
@@ -345,11 +411,17 @@ function M.live_grep()
 
   local flags = vim.deepcopy(get_live_grep_flags())
 
-  execute_grep(build_grep_args(user_input, {
+  if execute_grep(build_grep_args(user_input, {
     case_mode = flags.case_sensitive and "sensitive" or "insensitive",
     whole_word = flags.whole_word,
     fixed_strings = not flags.regex,
-  }))
+  })) then
+    -- If matches found, prioritize current line
+    vim.api.nvim_win_call(curr_win, function()
+      prioritize_current_line(user_input, flags)
+    end)
+  end
+
   set_live_grep_search_register(user_input, flags)
   refresh_search_highlight()
 end
