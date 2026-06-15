@@ -160,10 +160,52 @@ local function read_prompt_key()
   end
 
   if type(key) == "string" and key:find("Keyboard interrupt", 1, true) then
-    return vim.keycode("<C-c>")
+    return "^C"
   end
 
   error(key)
+end
+
+local function get_prompt_key_action(key)
+  local translated_key = vim.fn.keytrans(key)
+
+  if key == " " or translated_key == "<Space>" then
+    return "append"
+  end
+
+  if translated_key == "^M" then
+    return "submit"
+  end
+
+  if translated_key == "<Esc>" then
+    return "cancel"
+  end
+
+  if translated_key == "^C" then
+    return "toggle_case"
+  end
+
+  if translated_key == "^W" then
+    return "toggle_whole_word"
+  end
+
+  if translated_key == "^R" then
+    return "toggle_regex"
+  end
+
+  if translated_key == "<BS>" or translated_key == "^H" then
+    return "backspace"
+  end
+
+  if translated_key == "^U" then
+    return "clear"
+  end
+
+  if translated_key:match("^<.*>$") or translated_key:match("^%^[A-Z]$") then
+    return nil
+  end
+
+  return "append"
 end
 
 local function prompt_live_grep()
@@ -174,32 +216,30 @@ local function prompt_live_grep()
 
   while true do
     local key = read_prompt_key()
+    local action = get_prompt_key_action(key)
 
-    if key == vim.keycode("<CR>") then
+    if action == "submit" then
       vim.cmd.redraw()
       return pattern
     end
 
-    if key == vim.keycode("<Esc>") then
+    if action == "cancel" then
       vim.cmd.redraw()
       return nil
     end
 
-    if key == vim.keycode("<C-c>") then
+    if action == "toggle_case" then
       flags.case_sensitive = not flags.case_sensitive
-    elseif key == vim.keycode("<C-w>") then
+    elseif action == "toggle_whole_word" then
       flags.whole_word = not flags.whole_word
-    elseif key == vim.keycode("<C-r>") then
+    elseif action == "toggle_regex" then
       flags.regex = not flags.regex
-    elseif key == vim.keycode("<BS>") or key == vim.keycode("<C-h>") then
+    elseif action == "backspace" then
       pattern = trim_last_char(pattern)
-    elseif key == vim.keycode("<C-u>") then
+    elseif action == "clear" then
       pattern = ""
-    else
-      local translated_key = vim.fn.keytrans(key)
-      if not translated_key:match("^<.*>$") and not translated_key:match("^%^[A-Z]$") then
-        pattern = pattern .. key
-      end
+    elseif action == "append" then
+      pattern = pattern .. key
     end
 
     render_live_grep_prompt(pattern)
