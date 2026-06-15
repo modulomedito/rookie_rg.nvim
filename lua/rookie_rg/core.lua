@@ -601,6 +601,31 @@ local function get_buffer_display_name(bufinfo)
   return "[No Name]"
 end
 
+local function get_buffer_position(bufinfo)
+  local lnum = bufinfo.lnum and bufinfo.lnum > 0 and bufinfo.lnum or 1
+  local col = 1
+
+  for _, winid in ipairs(bufinfo.windows or {}) do
+    if vim.api.nvim_win_is_valid(winid) then
+      local cursor = vim.api.nvim_win_get_cursor(winid)
+      return cursor[1], cursor[2] + 1
+    end
+  end
+
+  local ok, mark = pcall(vim.api.nvim_buf_get_mark, bufinfo.bufnr, '"')
+  if ok and type(mark) == "table" then
+    if mark[1] ~= nil and mark[1] > 0 then
+      lnum = mark[1]
+    end
+
+    if mark[2] ~= nil and mark[2] >= 0 then
+      col = mark[2] + 1
+    end
+  end
+
+  return lnum, col
+end
+
 function M.show_buffers()
   local prev_win = vim.api.nvim_get_current_win()
   local buffers = vim.fn.getbufinfo({ buflisted = 1 })
@@ -615,10 +640,12 @@ function M.show_buffers()
 
   local items = {}
   for _, bufinfo in ipairs(buffers) do
+    local lnum, col = get_buffer_position(bufinfo)
+
     table.insert(items, {
       bufnr = bufinfo.bufnr,
-      lnum = 1,
-      col = 1,
+      lnum = lnum,
+      col = col,
       text = string.format(
         "%s %s",
         bufinfo.changed == 1 and "[+]" or "[ ]",
