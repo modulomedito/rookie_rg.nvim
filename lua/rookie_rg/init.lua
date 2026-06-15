@@ -18,7 +18,8 @@ function M.setup()
     return false
   end
 
-  vim.opt.grepprg = "rg --vimgrep --no-heading --smart-case --hidden"
+  -- Keep grepprg neutral; each search passes its own case mode flags.
+  vim.opt.grepprg = "rg --vimgrep --no-heading --hidden"
   vim.opt.grepformat = "%f:%l:%c:%m"
 
   require("rookie_rg.keymaps").setup()

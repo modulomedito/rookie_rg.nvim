@@ -92,11 +92,7 @@ local function build_grep_args(pattern, opts)
   local case_mode = opts.case_mode
 
   if case_mode == "sensitive" then
-    -- ripgrep uses --case-sensitive or -s
-    -- However, in many environments 'grep' is aliased or refers to different tools.
-    -- To be as robust as possible, we use --case-sensitive and also ensure we don't
-    -- have conflicting flags.
-    table.insert(args, "--case-sensitive")
+    table.insert(args, "-s")
   elseif case_mode == "insensitive" then
     table.insert(args, "-i")
   elseif case_mode == "smart" then
@@ -112,8 +108,6 @@ local function build_grep_args(pattern, opts)
   end
 
   table.insert(args, "--")
-  -- IMPORTANT: pattern must be shellescaped, but some tools like 'git grep'
-  -- or specific 'grepprg' setups might handle escaping differently.
   table.insert(args, vim.fn.shellescape(pattern))
   table.insert(args, ".")
 
@@ -121,23 +115,7 @@ local function build_grep_args(pattern, opts)
 end
 
 local function execute_grep(args)
-  -- If we are in case-sensitive mode, we must ensure 'ignorecase' and 'smartcase'
-  -- don't interfere with the internal grep execution if the tool respects them.
-  local save_ignorecase = vim.o.ignorecase
-  local save_smartcase = vim.o.smartcase
-
-  -- We don't want Vim's internal search settings to affect the external grep command
-  -- if the external tool is integrated in a way that respects them.
-  vim.o.ignorecase = false
-  vim.o.smartcase = false
-
-  -- Use -s to avoid error messages about non-existent files or directories
-  -- However, we must ensure it doesn't conflict with our case-sensitive flags
   vim.cmd("silent! grep! " .. table.concat(args, " "))
-
-  -- Restore settings
-  vim.o.ignorecase = save_ignorecase
-  vim.o.smartcase = save_smartcase
 
   if #vim.fn.getqflist() > 0 then
     vim.cmd.copen()
