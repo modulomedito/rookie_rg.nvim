@@ -146,6 +146,10 @@ local function format_live_grep_flags(flags)
   })
 end
 
+local function format_file_search_prompt()
+  return "Find Files"
+end
+
 local function open_live_grep_prompt()
   local prev_win = vim.api.nvim_get_current_win()
   local buf = vim.api.nvim_create_buf(false, true)
@@ -200,6 +204,37 @@ end
 local function render_live_grep_prompt(prompt, pattern, flags)
   local lines = {
     "Grep Pattern " .. format_live_grep_flags(flags),
+    pattern,
+  }
+  local width = 36
+
+  for _, line in ipairs(lines) do
+    width = math.max(width, vim.fn.strdisplaywidth(line) + 2)
+  end
+
+  width = math.min(width, math.max(vim.o.columns - 4, 20))
+
+  local config = {
+    relative = "editor",
+    style = "minimal",
+    border = "rounded",
+    width = width,
+    height = #lines,
+    row = math.max(1, math.floor((vim.o.lines - #lines) * 0.2)),
+    col = math.max(0, math.floor((vim.o.columns - width) / 2)),
+  }
+
+  vim.api.nvim_win_set_config(prompt.win, config)
+  vim.bo[prompt.buf].modifiable = true
+  vim.api.nvim_buf_set_lines(prompt.buf, 0, -1, false, lines)
+  vim.bo[prompt.buf].modifiable = false
+  vim.api.nvim_win_set_cursor(prompt.win, { 2, #pattern })
+  vim.cmd.redraw()
+end
+
+local function render_file_search_prompt(prompt, pattern)
+  local lines = {
+    format_file_search_prompt(),
     pattern,
   }
   local width = 36
@@ -351,6 +386,192 @@ local function prompt_live_grep()
   return result
 end
 
+local function prompt_file_search()
+  local pattern = ""
+  local prompt = open_live_grep_prompt()
+
+  local ok, result = pcall(function()
+    render_file_search_prompt(prompt, pattern)
+
+    while true do
+      local key = read_prompt_key()
+      if key == "" then
+        break
+      end
+
+      local action = get_prompt_key_action(key)
+      if action == "submit" then
+        return pattern
+      end
+
+      if action == "cancel" then
+        return nil
+      end
+
+      if action == "backspace" then
+        pattern = trim_last_char(pattern)
+      elseif action == "clear" then
+        pattern = ""
+      elseif action == "append" then
+        pattern = pattern .. key
+      end
+
+      render_file_search_prompt(prompt, pattern)
+    end
+  end)
+
+  close_live_grep_prompt(prompt)
+
+  if not ok then
+    error(result)
+  end
+
+  return result
+end
+
+local function fuzzy_score(candidate, query)
+  if query == "" then
+    return 0
+  end
+
+  local candidate_lower = candidate:lower()
+  local query_lower = query:lower()
+  local query_len = #query_lower
+  local candidate_len = #candidate_lower
+  local score = 0
+  local start_idx = nil
+  local last_match_idx = nil
+  local search_from = 1
+
+  for i = 1, query_len do
+    local ch = query_lower:sub(i, i)
+    local found = candidate_lower:find(ch, search_from, true)
+    if found == nil then
+      return nil
+    end
+
+    if start_idx == nil then
+      start_idx = found
+      score = score + math.max(0, 100 - found)
+    end
+
+    if last_match_idx ~= nil then
+      if found == last_match_idx + 1 then
+        score = score + 15
+      else
+        score = score - (found - last_match_idx - 1)
+      end
+    end
+
+    local prev = found > 1 and candidate_lower:sub(found - 1, found - 1) or ""
+    if prev == "/" or prev == "\\" or prev == "_" or prev == "-" or prev == " " then
+      score = score + 10
+    end
+
+    last_match_idx = found
+    search_from = found + 1
+  end
+
+  score = score - (candidate_len - query_len)
+  return score
+end
+
+local function get_project_files()
+  local files = vim.fn.systemlist({ "rg", "--files", "--hidden" })
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+
+  return files
+end
+
+local function build_file_quickfix_items(files)
+  local items = {}
+
+  for _, file in ipairs(files) do
+    local bufnr = vim.fn.bufnr(file)
+    if bufnr > 0 then
+      table.insert(items, {
+        bufnr = bufnr,
+        filename = file,
+        lnum = 1,
+        col = 1,
+        text = file,
+      })
+    else
+      table.insert(items, {
+        filename = file,
+        lnum = 1,
+        col = 1,
+        text = file,
+      })
+    end
+  end
+
+  return items
+end
+
+local function open_file_quickfix(files, query)
+  local items = build_file_quickfix_items(files)
+  if vim.tbl_isempty(items) then
+    vim.cmd.cclose()
+    vim.api.nvim_echo({ { "No files found." } }, false, {})
+    return false
+  end
+
+  vim.fn.setqflist({}, "r", {
+    title = query == "" and "Files" or ("Files: " .. query),
+    items = items,
+  })
+  vim.cmd.copen()
+  vim.cmd("wincmd p")
+  vim.cmd.redraw()
+  return true
+end
+
+local function find_files(query)
+  local files = get_project_files()
+  if files == nil then
+    vim.api.nvim_echo({ { "Failed to list project files." } }, false, {})
+    return false
+  end
+
+  if query == "" then
+    table.sort(files)
+    return open_file_quickfix(files, query)
+  end
+
+  local matches = {}
+  for _, file in ipairs(files) do
+    local score = fuzzy_score(file, query)
+    if score ~= nil then
+      table.insert(matches, {
+        file = file,
+        score = score,
+      })
+    end
+  end
+
+  table.sort(matches, function(a, b)
+    if a.score ~= b.score then
+      return a.score > b.score
+    end
+
+    if #a.file ~= #b.file then
+      return #a.file < #b.file
+    end
+
+    return a.file < b.file
+  end)
+
+  local files_only = {}
+  for _, match in ipairs(matches) do
+    table.insert(files_only, match.file)
+  end
+
+  return open_file_quickfix(files_only, query)
+end
+
 local function prioritize_current_line(pattern, flags)
   local curr_buf = vim.fn.bufnr("%")
   local curr_lnum = vim.fn.line(".")
@@ -434,6 +655,15 @@ function M.live_grep()
 
   set_live_grep_search_register(user_input, flags)
   refresh_search_highlight()
+end
+
+function M.find_files()
+  local query = prompt_file_search()
+  if query == nil then
+    return
+  end
+
+  find_files(query)
 end
 
 function M.global_grep()
@@ -640,18 +870,20 @@ function M.show_buffers()
 
   local items = {}
   for _, bufinfo in ipairs(buffers) do
-    local lnum, col = get_buffer_position(bufinfo)
+    if vim.bo[bufinfo.bufnr].buftype ~= "quickfix" then
+      local lnum, col = get_buffer_position(bufinfo)
 
-    table.insert(items, {
-      bufnr = bufinfo.bufnr,
-      lnum = lnum,
-      col = col,
-      text = string.format(
-        "%s %s",
-        bufinfo.changed == 1 and "[+]" or "[ ]",
-        get_buffer_display_name(bufinfo)
-      ),
-    })
+      table.insert(items, {
+        bufnr = bufinfo.bufnr,
+        lnum = lnum,
+        col = col,
+        text = string.format(
+          "%s %s",
+          bufinfo.changed == 1 and "[+]" or "[ ]",
+          get_buffer_display_name(bufinfo)
+        ),
+      })
+    end
   end
 
   if vim.tbl_isempty(items) then

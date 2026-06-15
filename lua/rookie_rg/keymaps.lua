@@ -20,6 +20,10 @@ function M.setup()
     desc = "RookieRg: show listed buffers in quickfix",
   }))
 
+  vim.keymap.set("n", "<C-p>", core.find_files, vim.tbl_extend("force", opts, {
+    desc = "RookieRg: fuzzy find files in quickfix",
+  }))
+
   vim.keymap.set("n", "<F9>", core.quickfix_prev, vim.tbl_extend("force", opts, {
     desc = "Previous quickfix item",
   }))
