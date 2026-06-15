@@ -125,4 +125,82 @@ function M.clear_highlight()
   end
 end
 
+local function get_quickfix_filename(item)
+  if not item then
+    return nil
+  end
+
+  if item.bufnr and item.bufnr > 0 then
+    local bufname = vim.fn.bufname(item.bufnr)
+    if bufname ~= "" then
+      return bufname
+    end
+  end
+
+  if item.filename and item.filename ~= "" then
+    return item.filename
+  end
+
+  return nil
+end
+
+local function jump_quickfix(cmd, item)
+  local ok, err = pcall(vim.cmd, cmd)
+  if ok then
+    return
+  end
+
+  if type(err) == "string" and err:find("E824:") then
+    local filename = get_quickfix_filename(item)
+    if filename then
+      local undofile = vim.fn.undofile(filename)
+      if vim.fn.filereadable(undofile) == 1 then
+        vim.fn.delete(undofile)
+        vim.cmd(cmd)
+        return
+      end
+    end
+  end
+
+  error(err)
+end
+
+local function cycle_quickfix(step)
+  local qf = vim.fn.getqflist({ idx = 0, items = 1, size = 0 })
+  if qf.size == 0 then
+    return
+  end
+
+  local cmd
+  local target_idx
+
+  if step > 0 then
+    if qf.idx >= qf.size then
+      cmd = "cfirst"
+      target_idx = 1
+    else
+      cmd = "cnext"
+      target_idx = qf.idx + 1
+    end
+  else
+    if qf.idx <= 1 then
+      cmd = "clast"
+      target_idx = qf.size
+    else
+      cmd = "cprevious"
+      target_idx = qf.idx - 1
+    end
+  end
+
+  jump_quickfix(cmd, qf.items[target_idx])
+end
+
+function M.quickfix_prev()
+  cycle_quickfix(-1)
+end
+
+function M.quickfix_next()
+  cycle_quickfix(1)
+end
+
 return M
