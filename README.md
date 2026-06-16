@@ -59,6 +59,9 @@ Performance notes:
 Inside the quickfix window:
 
 - `Enter`: open selected item
+- `j` / `k`: move selection and refresh the floating preview
+- `<C-d>` / `<C-u>`: page through quickfix and refresh the floating preview
+- `gg` / `G`: jump to the first or last quickfix item and refresh the floating preview
 - `s`: open selected item in a horizontal split
 - `v`: open selected item in a vertical split
 - `t`: open selected item in a new tab

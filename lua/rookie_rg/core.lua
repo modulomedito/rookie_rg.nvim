@@ -644,7 +644,11 @@ local function get_preview_source(item)
   local start_lnum = 1
   local end_lnum = 1
 
-  if item.bufnr and item.bufnr > 0 and vim.api.nvim_buf_is_valid(item.bufnr) then
+  if item.bufnr
+    and item.bufnr > 0
+    and vim.api.nvim_buf_is_valid(item.bufnr)
+    and vim.api.nvim_buf_is_loaded(item.bufnr)
+  then
     local total_lines = vim.api.nvim_buf_line_count(item.bufnr)
     start_lnum = math.max(1, lnum - quickfix_preview_context)
     end_lnum = math.min(total_lines, lnum + quickfix_preview_context)
@@ -1375,6 +1379,19 @@ end
 function M.close_quickfix()
   close_quickfix_preview()
   vim.cmd.cclose()
+end
+
+function M.close_quickfix_preview()
+  close_quickfix_preview()
+end
+
+function M.preview_selected_quickfix_item()
+  local _, _, item = get_selected_quickfix_entry()
+  if item == nil then
+    return false
+  end
+
+  return preview_quickfix_item(item)
 end
 
 function M.quickfix_prev()
