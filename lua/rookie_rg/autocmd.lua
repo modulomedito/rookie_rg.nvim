@@ -23,6 +23,36 @@ function M.setup()
         silent = true,
         desc = "Open quickfix item",
       })
+
+      vim.keymap.set("n", "s", function()
+        require("rookie_rg.core").quickfix_split()
+      end, {
+        buffer = args.buf,
+        silent = true,
+        desc = "Open quickfix item in split",
+      })
+
+      vim.keymap.set("n", "v", function()
+        require("rookie_rg.core").quickfix_vsplit()
+      end, {
+        buffer = args.buf,
+        silent = true,
+        desc = "Open quickfix item in vertical split",
+      })
+
+      vim.keymap.set("n", "t", function()
+        require("rookie_rg.core").quickfix_tabedit()
+      end, {
+        buffer = args.buf,
+        silent = true,
+        desc = "Open quickfix item in new tab",
+      })
+
+      vim.keymap.set("n", "q", "<Cmd>cclose<CR>", {
+        buffer = args.buf,
+        silent = true,
+        desc = "Close quickfix window",
+      })
     end,
     desc = "Handle Enter in quickfix windows",
   })

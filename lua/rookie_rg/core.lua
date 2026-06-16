@@ -328,6 +328,10 @@ local function get_prompt_key_action(key)
   return "append"
 end
 
+local get_project_files
+local open_file_quickfix
+local find_files
+
 local function prompt_live_grep()
   local flags = vim.deepcopy(get_live_grep_flags())
   local pattern = ""
@@ -389,9 +393,23 @@ end
 local function prompt_file_search()
   local pattern = ""
   local prompt = open_live_grep_prompt()
+  local project_files = get_project_files()
+
+  if project_files == nil then
+    close_live_grep_prompt(prompt)
+    vim.api.nvim_echo({ { "Failed to list project files." } }, false, {})
+    return nil
+  end
+
+  table.sort(project_files)
 
   local ok, result = pcall(function()
     render_file_search_prompt(prompt, pattern)
+    open_file_quickfix(project_files, pattern, {
+      focus_quickfix = false,
+      restore_win = prompt.win,
+      notify_on_empty = false,
+    })
 
     while true do
       local key = read_prompt_key()
@@ -401,10 +419,14 @@ local function prompt_file_search()
 
       local action = get_prompt_key_action(key)
       if action == "submit" then
-        return pattern
+        return {
+          pattern = pattern,
+          project_files = project_files,
+        }
       end
 
       if action == "cancel" then
+        vim.cmd.cclose()
         return nil
       end
 
@@ -416,6 +438,12 @@ local function prompt_file_search()
         pattern = pattern .. key
       end
 
+      find_files(pattern, {
+        project_files = project_files,
+        focus_quickfix = false,
+        restore_win = prompt.win,
+        notify_on_empty = false,
+      })
       render_file_search_prompt(prompt, pattern)
     end
   end)
@@ -438,10 +466,21 @@ local function fuzzy_score(candidate, query)
   local query_lower = query:lower()
   local query_len = #query_lower
   local candidate_len = #candidate_lower
+  local basename = candidate:match("[^/\\]+$") or candidate
+  local basename_lower = basename:lower()
   local score = 0
   local start_idx = nil
   local last_match_idx = nil
   local search_from = 1
+
+  if basename_lower:find(query_lower, 1, true) == 1 then
+    score = score + 150
+  else
+    local basename_match = basename_lower:find(query_lower, 1, true)
+    if basename_match ~= nil then
+      score = score + math.max(0, 110 - basename_match)
+    end
+  end
 
   for i = 1, query_len do
     local ch = query_lower:sub(i, i)
@@ -468,6 +507,11 @@ local function fuzzy_score(candidate, query)
       score = score + 10
     end
 
+    local curr = candidate:sub(found, found)
+    if curr:match("%u") then
+      score = score + 3
+    end
+
     last_match_idx = found
     search_from = found + 1
   end
@@ -476,7 +520,7 @@ local function fuzzy_score(candidate, query)
   return score
 end
 
-local function get_project_files()
+get_project_files = function()
   local files = vim.fn.systemlist({ "rg", "--files", "--hidden" })
   if vim.v.shell_error ~= 0 then
     return nil
@@ -511,33 +555,45 @@ local function build_file_quickfix_items(files)
   return items
 end
 
-local function open_file_quickfix(files, query)
+open_file_quickfix = function(files, query, opts)
+  opts = opts or {}
   local items = build_file_quickfix_items(files)
+  local title = query == "" and "Files" or ("Files: " .. query)
+
   if vim.tbl_isempty(items) then
+    vim.fn.setqflist({}, "r", {
+      title = title,
+      items = {},
+    })
     vim.cmd.cclose()
-    vim.api.nvim_echo({ { "No files found." } }, false, {})
+    if opts.notify_on_empty ~= false then
+      vim.api.nvim_echo({ { "No files found." } }, false, {})
+    end
     return false
   end
 
   vim.fn.setqflist({}, "r", {
-    title = query == "" and "Files" or ("Files: " .. query),
+    title = title,
     items = items,
   })
   vim.cmd.copen()
+  if opts.focus_quickfix == false and opts.restore_win and vim.api.nvim_win_is_valid(opts.restore_win) then
+    pcall(vim.api.nvim_set_current_win, opts.restore_win)
+  end
   vim.cmd.redraw()
   return true
 end
 
-local function find_files(query)
-  local files = get_project_files()
+find_files = function(query, opts)
+  opts = opts or {}
+  local files = opts.project_files or get_project_files()
   if files == nil then
     vim.api.nvim_echo({ { "Failed to list project files." } }, false, {})
     return false
   end
 
   if query == "" then
-    table.sort(files)
-    return open_file_quickfix(files, query)
+    return open_file_quickfix(files, query, opts)
   end
 
   local matches = {}
@@ -564,11 +620,15 @@ local function find_files(query)
   end)
 
   local files_only = {}
-  for _, match in ipairs(matches) do
+  local max_results = opts.max_results or 200
+  for i, match in ipairs(matches) do
+    if i > max_results then
+      break
+    end
     table.insert(files_only, match.file)
   end
 
-  return open_file_quickfix(files_only, query)
+  return open_file_quickfix(files_only, query, opts)
 end
 
 local function prioritize_current_line(pattern, flags)
@@ -657,12 +717,16 @@ function M.live_grep()
 end
 
 function M.find_files()
-  local query = prompt_file_search()
-  if query == nil then
+  local prompt_result = prompt_file_search()
+  if prompt_result == nil then
     return
   end
 
-  find_files(query)
+  find_files(prompt_result.pattern, {
+    project_files = prompt_result.project_files,
+    focus_quickfix = true,
+    notify_on_empty = true,
+  })
 end
 
 function M.global_grep()
@@ -864,6 +928,56 @@ local function find_non_quickfix_window()
   return nil
 end
 
+local function get_selected_quickfix_entry()
+  local qf = vim.fn.getqflist({ idx = 0, items = 1, size = 0, title = 1 })
+  local selected_idx = vim.api.nvim_win_get_cursor(0)[1]
+
+  if qf.size == 0 or selected_idx < 1 or selected_idx > #qf.items then
+    return nil, nil, nil
+  end
+
+  return qf, selected_idx, qf.items[selected_idx]
+end
+
+local function post_quickfix_open(qf_title, qf_win)
+  if is_file_search_quickfix(qf_title) then
+    if qf_win and vim.api.nvim_win_is_valid(qf_win) then
+      pcall(vim.api.nvim_win_close, qf_win, true)
+    else
+      vim.cmd.cclose()
+    end
+  elseif is_buffer_quickfix(qf_title) then
+    M.show_buffers()
+  end
+end
+
+local function open_selected_quickfix_item(mode)
+  local qf, selected_idx, item = get_selected_quickfix_entry()
+  if qf == nil then
+    return
+  end
+
+  local qf_win = vim.api.nvim_get_current_win()
+
+  if mode == "tabedit" then
+    vim.cmd.tabnew()
+  else
+    local target_win = find_non_quickfix_window()
+    if target_win and vim.api.nvim_win_is_valid(target_win) then
+      pcall(vim.api.nvim_set_current_win, target_win)
+    end
+
+    if mode == "split" then
+      vim.cmd.split()
+    elseif mode == "vsplit" then
+      vim.cmd.vsplit()
+    end
+  end
+
+  jump_quickfix("cc " .. selected_idx, item)
+  post_quickfix_open(qf.title, qf_win)
+end
+
 local function get_buffer_display_name(bufinfo)
   if bufinfo.name ~= nil and bufinfo.name ~= "" then
     return vim.fn.fnamemodify(bufinfo.name, ":.")
@@ -954,25 +1068,19 @@ function M.toggle_quickfix()
 end
 
 function M.quickfix_enter()
-  local qf = vim.fn.getqflist({ idx = 0, items = 1, size = 0, title = 1 })
-  local selected_idx = vim.api.nvim_win_get_cursor(0)[1]
+  open_selected_quickfix_item("edit")
+end
 
-  if qf.size == 0 or selected_idx < 1 or selected_idx > #qf.items then
-    return
-  end
+function M.quickfix_split()
+  open_selected_quickfix_item("split")
+end
 
-  local target_win = find_non_quickfix_window()
-  if target_win and vim.api.nvim_win_is_valid(target_win) then
-    pcall(vim.api.nvim_set_current_win, target_win)
-  end
+function M.quickfix_vsplit()
+  open_selected_quickfix_item("vsplit")
+end
 
-  jump_quickfix("cc " .. selected_idx, qf.items[selected_idx])
-
-  if is_file_search_quickfix(qf.title) then
-    vim.cmd.cclose()
-  elseif is_buffer_quickfix(qf.title) then
-    M.show_buffers()
-  end
+function M.quickfix_tabedit()
+  open_selected_quickfix_item("tabedit")
 end
 
 function M.quickfix_prev()
