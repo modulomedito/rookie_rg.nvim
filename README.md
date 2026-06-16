@@ -18,6 +18,7 @@ Normal mode:
 Visual mode:
 
 - `<leader>gg`: grep visual selection
+- `<leader>gf`: open live grep prompt prefilled from visual selection
 
 ## Live Grep Prompt
 

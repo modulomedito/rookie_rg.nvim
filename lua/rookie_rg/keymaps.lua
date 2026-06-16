@@ -16,6 +16,10 @@ function M.setup()
     desc = "RookieRg: prompt for grep pattern",
   }))
 
+  vim.keymap.set("x", "<leader>gf", core.visual_live_grep, vim.tbl_extend("force", opts, {
+    desc = "RookieRg: prompt for grep pattern from visual selection",
+  }))
+
   vim.keymap.set("n", "<leader>b", core.show_buffers, vim.tbl_extend("force", opts, {
     desc = "RookieRg: show listed buffers in quickfix",
   }))

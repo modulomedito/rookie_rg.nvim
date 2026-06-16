@@ -107,6 +107,14 @@ local function get_visual_selection()
   return table.concat(lines, "\n")
 end
 
+local function normalize_prompt_text(text)
+  if text == nil or text == "" then
+    return ""
+  end
+
+  return (text:gsub("[\r\n]+", " "))
+end
+
 local function build_grep_args(pattern, opts)
   opts = opts or {}
 
@@ -360,9 +368,9 @@ local get_project_files
 local open_file_quickfix
 local find_files
 
-local function prompt_live_grep()
+local function prompt_live_grep(initial_pattern)
   local flags = vim.deepcopy(get_live_grep_flags())
-  local pattern = ""
+  local pattern = normalize_prompt_text(initial_pattern or "")
   local prompt = open_live_grep_prompt()
 
   local ok, result = pcall(function()
@@ -915,8 +923,12 @@ local function prioritize_current_line(pattern, flags)
 end
 
 function M.live_grep()
+  return M.live_grep_with_input("")
+end
+
+function M.live_grep_with_input(initial_pattern)
   local curr_win = vim.api.nvim_get_current_win()
-  local prompt_result = prompt_live_grep()
+  local prompt_result = prompt_live_grep(initial_pattern)
   if prompt_result == nil or prompt_result.pattern == "" then
     return
   end
@@ -937,6 +949,15 @@ function M.live_grep()
 
   set_live_grep_search_register(user_input, flags)
   refresh_search_highlight()
+end
+
+function M.visual_live_grep()
+  local selection = get_visual_selection()
+  if selection == "" then
+    return
+  end
+
+  M.live_grep_with_input(selection)
 end
 
 function M.find_files()
