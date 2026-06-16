@@ -431,6 +431,7 @@ local function prompt_file_search()
       end
 
       local action = get_prompt_key_action(key)
+      local pattern_changed = false
       if action == "submit" then
         if M.quickfix_enter() then
           return {
@@ -451,21 +452,24 @@ local function prompt_file_search()
 
       if action == "backspace" then
         pattern = trim_last_char(pattern)
+        pattern_changed = true
       elseif action == "clear" then
         pattern = ""
+        pattern_changed = true
       elseif action == "append" then
         pattern = pattern .. key
+        pattern_changed = true
       elseif action == "select_next" then
         M.quickfix_select_next()
       elseif action == "select_prev" then
         M.quickfix_select_prev()
       end
 
-      if vim.fn.strchars(pattern) < min_live_file_search_chars then
+      if pattern_changed and vim.fn.strchars(pattern) < min_live_file_search_chars then
         previous_pattern = ""
         previous_matches = project_files
         vim.cmd.cclose()
-      else
+      elseif pattern_changed then
         local source_files = project_files
         if starts_with(pattern, previous_pattern) and previous_matches ~= nil then
           source_files = previous_matches
