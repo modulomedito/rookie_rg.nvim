@@ -38,7 +38,9 @@ The grep flags are preserved between prompt sessions.
 Inside the floating file search prompt:
 
 - type to live-update quickfix file results
-- `Enter`: finish file search and move focus to quickfix
+- `Up` / `Down`: move the quickfix selection
+- `Ctrl-P` / `Ctrl-N`: move the quickfix selection
+- `Enter`: confirm and open the currently selected quickfix item
 - `Esc`: cancel and close the file search results
 - `Ctrl-U`: clear input
 - `Backspace`: delete one character

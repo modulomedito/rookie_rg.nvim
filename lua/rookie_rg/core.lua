@@ -329,6 +329,14 @@ local function get_prompt_key_action(key)
     return "clear"
   end
 
+  if translated_key == "<Down>" or translated_key == "^N" or translated_key == "<C-N>" then
+    return "select_next"
+  end
+
+  if translated_key == "<Up>" or translated_key == "^P" or translated_key == "<C-P>" then
+    return "select_prev"
+  end
+
   if translated_key:match("^<.*>$") or translated_key:match("^%^[A-Z]$") then
     return nil
   end
@@ -424,6 +432,12 @@ local function prompt_file_search()
 
       local action = get_prompt_key_action(key)
       if action == "submit" then
+        if M.quickfix_enter() then
+          return {
+            confirmed = true,
+          }
+        end
+
         return {
           pattern = pattern,
           project_files = project_files,
@@ -441,6 +455,10 @@ local function prompt_file_search()
         pattern = ""
       elseif action == "append" then
         pattern = pattern .. key
+      elseif action == "select_next" then
+        M.quickfix_select_next()
+      elseif action == "select_prev" then
+        M.quickfix_select_prev()
       end
 
       if vim.fn.strchars(pattern) < min_live_file_search_chars then
@@ -762,6 +780,10 @@ function M.find_files()
     return
   end
 
+  if prompt_result.confirmed then
+    return
+  end
+
   find_files(prompt_result.pattern, {
     project_files = prompt_result.project_files,
     focus_quickfix = true,
@@ -968,15 +990,51 @@ local function find_non_quickfix_window()
   return nil
 end
 
-local function get_selected_quickfix_entry()
-  local qf = vim.fn.getqflist({ idx = 0, items = 1, size = 0, title = 1 })
-  local selected_idx = vim.api.nvim_win_get_cursor(0)[1]
-
-  if qf.size == 0 or selected_idx < 1 or selected_idx > #qf.items then
-    return nil, nil, nil
+local function get_quickfix_window_id()
+  for _, wininfo in ipairs(vim.fn.getwininfo()) do
+    if wininfo.quickfix == 1 and wininfo.loclist ~= 1 then
+      return wininfo.winid
+    end
   end
 
-  return qf, selected_idx, qf.items[selected_idx]
+  return nil
+end
+
+local function get_selected_quickfix_entry()
+  local qf = vim.fn.getqflist({ idx = 0, items = 1, size = 0, title = 1 })
+  local qf_win = get_quickfix_window_id()
+
+  if qf_win == nil or not vim.api.nvim_win_is_valid(qf_win) then
+    return nil, nil, nil, nil
+  end
+
+  local selected_idx = vim.api.nvim_win_get_cursor(qf_win)[1]
+
+  if qf.size == 0 or selected_idx < 1 or selected_idx > #qf.items then
+    return nil, nil, nil, nil
+  end
+
+  return qf, selected_idx, qf.items[selected_idx], qf_win
+end
+
+local function set_quickfix_selection(target_idx)
+  local qf = vim.fn.getqflist({ items = 1, size = 0 })
+  local qf_win = get_quickfix_window_id()
+
+  if qf.size == 0 or qf_win == nil or not vim.api.nvim_win_is_valid(qf_win) then
+    return false
+  end
+
+  if target_idx < 1 then
+    target_idx = qf.size
+  elseif target_idx > qf.size then
+    target_idx = 1
+  end
+
+  pcall(vim.fn.setqflist, {}, "a", { idx = target_idx })
+  pcall(vim.api.nvim_win_set_cursor, qf_win, { target_idx, 0 })
+  vim.cmd.redraw()
+  return true
 end
 
 local function post_quickfix_open(qf_title, qf_win)
@@ -992,12 +1050,10 @@ local function post_quickfix_open(qf_title, qf_win)
 end
 
 local function open_selected_quickfix_item(mode)
-  local qf, selected_idx, item = get_selected_quickfix_entry()
+  local qf, selected_idx, item, qf_win = get_selected_quickfix_entry()
   if qf == nil then
-    return
+    return false
   end
-
-  local qf_win = vim.api.nvim_get_current_win()
 
   if mode == "tabedit" then
     vim.cmd.tabnew()
@@ -1016,6 +1072,7 @@ local function open_selected_quickfix_item(mode)
 
   jump_quickfix("cc " .. selected_idx, item)
   post_quickfix_open(qf.title, qf_win)
+  return true
 end
 
 local function get_buffer_display_name(bufinfo)
@@ -1108,19 +1165,37 @@ function M.toggle_quickfix()
 end
 
 function M.quickfix_enter()
-  open_selected_quickfix_item("edit")
+  return open_selected_quickfix_item("edit")
 end
 
 function M.quickfix_split()
-  open_selected_quickfix_item("split")
+  return open_selected_quickfix_item("split")
 end
 
 function M.quickfix_vsplit()
-  open_selected_quickfix_item("vsplit")
+  return open_selected_quickfix_item("vsplit")
 end
 
 function M.quickfix_tabedit()
-  open_selected_quickfix_item("tabedit")
+  return open_selected_quickfix_item("tabedit")
+end
+
+function M.quickfix_select_next()
+  local _, selected_idx = get_selected_quickfix_entry()
+  if selected_idx == nil then
+    return false
+  end
+
+  return set_quickfix_selection(selected_idx + 1)
+end
+
+function M.quickfix_select_prev()
+  local _, selected_idx = get_selected_quickfix_entry()
+  if selected_idx == nil then
+    return false
+  end
+
+  return set_quickfix_selection(selected_idx - 1)
 end
 
 function M.quickfix_prev()
