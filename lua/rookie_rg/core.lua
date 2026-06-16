@@ -87,13 +87,42 @@ local function refresh_search_highlight()
 end
 
 local function get_visual_selection()
-  local start_pos = vim.fn.getpos("'<")
-  local end_pos = vim.fn.getpos("'>")
+  local mode = vim.fn.mode(1)
+  local visual_mode = mode
+  local start_pos
+  local end_pos
 
-  local start_row = start_pos[2] - 1
-  local start_col = start_pos[3] - 1
-  local end_row = end_pos[2] - 1
+  if mode == "v" or mode == "V" or mode == "\22" then
+    start_pos = vim.fn.getpos("v")
+    end_pos = vim.fn.getpos(".")
+  else
+    start_pos = vim.fn.getpos("'<")
+    end_pos = vim.fn.getpos("'>")
+    visual_mode = vim.fn.visualmode()
+  end
+
+  local start_row = start_pos[2]
+  local start_col = start_pos[3]
+  local end_row = end_pos[2]
   local end_col = end_pos[3]
+
+  if start_row > end_row or (start_row == end_row and start_col > end_col) then
+    start_row, end_row = end_row, start_row
+    start_col, end_col = end_col, start_col
+  end
+
+  if visual_mode == "V" then
+    local lines = vim.api.nvim_buf_get_lines(0, start_row - 1, end_row, false)
+    if #lines == 0 then
+      return ""
+    end
+
+    return table.concat(lines, "\n")
+  end
+
+  start_row = start_row - 1
+  start_col = math.max(start_col - 1, 0)
+  end_row = end_row - 1
 
   if vim.o.selection ~= "inclusive" then
     end_col = math.max(end_col - 1, 0)
