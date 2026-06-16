@@ -48,7 +48,9 @@ function M.setup()
         desc = "Open quickfix item in new tab",
       })
 
-      vim.keymap.set("n", "q", "<Cmd>cclose<CR>", {
+      vim.keymap.set("n", "q", function()
+        require("rookie_rg.core").close_quickfix()
+      end, {
         buffer = args.buf,
         silent = true,
         desc = "Close quickfix window",

@@ -11,8 +11,8 @@ Normal mode:
 - `<leader>b`: show existing buffers in quickfix
 - `<C-p>`: open fuzzy file search prompt
 - `<F8>`: toggle quickfix window
-- `<F9>`: previous quickfix item
-- `<F10>`: next quickfix item
+- `<F9>`: preview previous quickfix item
+- `<F10>`: preview next quickfix item
 - `<F11>`: close quickfix window
 
 Visual mode:
@@ -70,6 +70,8 @@ Extra behavior:
 - buffer quickfix refreshes after switching buffers
 - existing buffer quickfix skips quickfix buffers
 - existing buffer quickfix skips unnamed, unmodified buffers
+- `<F9>` / `<F10>` move the quickfix selection and show a floating preview without opening the file
+- use `Enter` after previewing to open the currently selected quickfix item
 
 ## Notes
 

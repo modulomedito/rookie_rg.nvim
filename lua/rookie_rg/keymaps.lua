@@ -25,14 +25,14 @@ function M.setup()
   }))
 
   vim.keymap.set("n", "<F9>", core.quickfix_prev, vim.tbl_extend("force", opts, {
-    desc = "Previous quickfix item",
+    desc = "Previous quickfix item preview",
   }))
 
   vim.keymap.set("n", "<F10>", core.quickfix_next, vim.tbl_extend("force", opts, {
-    desc = "Next quickfix item",
+    desc = "Next quickfix item preview",
   }))
 
-  vim.keymap.set("n", "<F11>", "<Cmd>cclose<CR>", vim.tbl_extend("force", opts, {
+  vim.keymap.set("n", "<F11>", core.close_quickfix, vim.tbl_extend("force", opts, {
     desc = "Close quickfix list",
   }))
 

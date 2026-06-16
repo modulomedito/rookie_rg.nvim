@@ -9,6 +9,16 @@ local default_live_grep_flags = {
 local min_live_file_search_chars = 2
 local max_live_file_search_results = 80
 local max_file_search_results = 200
+local quickfix_preview_context = 8
+local quickfix_preview = {
+  buf = nil,
+  win = nil,
+  ns = vim.api.nvim_create_namespace("RookieRgQuickfixPreview"),
+}
+local close_quickfix_preview
+local get_quickfix_filename
+local get_quickfix_window_id
+local set_quickfix_selection
 
 local function get_live_grep_flags()
   local flags = vim.g.rookie_rg_live_grep_flags
@@ -127,6 +137,8 @@ local function build_grep_args(pattern, opts)
 end
 
 local function execute_grep(args)
+  close_quickfix_preview()
+
   vim.cmd("silent! grep! " .. table.concat(args, " "))
 
   if #vim.fn.getqflist() > 0 then
@@ -598,8 +610,153 @@ local function build_file_quickfix_items(files)
   return items
 end
 
+close_quickfix_preview = function()
+  if quickfix_preview.win and vim.api.nvim_win_is_valid(quickfix_preview.win) then
+    vim.api.nvim_win_close(quickfix_preview.win, true)
+  elseif quickfix_preview.buf and vim.api.nvim_buf_is_valid(quickfix_preview.buf) then
+    vim.api.nvim_buf_delete(quickfix_preview.buf, { force = true })
+  end
+
+  quickfix_preview.buf = nil
+  quickfix_preview.win = nil
+end
+
+local function ensure_quickfix_preview_buffer()
+  if quickfix_preview.buf and vim.api.nvim_buf_is_valid(quickfix_preview.buf) then
+    return quickfix_preview.buf
+  end
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].modifiable = false
+  quickfix_preview.buf = buf
+  return buf
+end
+
+local function get_preview_source(item)
+  local lnum = math.max(1, item.lnum or 1)
+  local filename = get_quickfix_filename(item)
+  local source_ft = ""
+  local source_name = filename
+  local lines = nil
+  local start_lnum = 1
+  local end_lnum = 1
+
+  if item.bufnr and item.bufnr > 0 and vim.api.nvim_buf_is_valid(item.bufnr) then
+    local total_lines = vim.api.nvim_buf_line_count(item.bufnr)
+    start_lnum = math.max(1, lnum - quickfix_preview_context)
+    end_lnum = math.min(total_lines, lnum + quickfix_preview_context)
+    lines = vim.api.nvim_buf_get_lines(item.bufnr, start_lnum - 1, end_lnum, false)
+    source_ft = vim.bo[item.bufnr].filetype or ""
+    if source_name == nil or source_name == "" then
+      source_name = vim.fn.bufname(item.bufnr)
+    end
+  elseif filename and filename ~= "" then
+    local ok, file_lines = pcall(vim.fn.readfile, filename)
+    if not ok then
+      return nil
+    end
+
+    start_lnum = math.max(1, lnum - quickfix_preview_context)
+    end_lnum = math.min(#file_lines, lnum + quickfix_preview_context)
+    lines = {}
+    for line_nr = start_lnum, end_lnum do
+      table.insert(lines, file_lines[line_nr] or "")
+    end
+    source_ft = vim.filetype.match({ filename = filename }) or ""
+  else
+    return nil
+  end
+
+  if lines == nil or vim.tbl_isempty(lines) then
+    lines = { "" }
+    start_lnum = lnum
+    end_lnum = lnum
+  end
+
+  local number_width = math.max(2, #tostring(end_lnum))
+  local preview_lines = {}
+  for idx, line in ipairs(lines) do
+    local absolute_lnum = start_lnum + idx - 1
+    table.insert(preview_lines, string.format("%" .. number_width .. "d %s", absolute_lnum, line))
+  end
+
+  return {
+    title = source_name ~= nil and source_name ~= "" and vim.fn.fnamemodify(source_name, ":.") or "[No Name]",
+    lines = preview_lines,
+    target_lnum = math.min(#preview_lines, math.max(1, lnum - start_lnum + 1)),
+    filetype = source_ft,
+  }
+end
+
+local function preview_quickfix_item(item)
+  local preview = get_preview_source(item)
+  if preview == nil then
+    close_quickfix_preview()
+    return false
+  end
+
+  local buf = ensure_quickfix_preview_buffer()
+  local content_width = 36
+  for _, line in ipairs(preview.lines) do
+    content_width = math.max(content_width, vim.fn.strdisplaywidth(line) + 2)
+  end
+
+  local width = math.min(content_width, math.max(40, math.floor(vim.o.columns * 0.55)))
+  local height = math.min(#preview.lines, math.max(6, math.floor(vim.o.lines * 0.45)))
+  local row = math.max(1, math.floor((vim.o.lines - height) * 0.18))
+  local col = math.max(0, vim.o.columns - width - 3)
+
+  if quickfix_preview.win and vim.api.nvim_win_is_valid(quickfix_preview.win) then
+    vim.api.nvim_win_set_config(quickfix_preview.win, {
+      relative = "editor",
+      style = "minimal",
+      border = "rounded",
+      row = row,
+      col = col,
+      width = width,
+      height = height,
+      title = " Preview: " .. preview.title .. " ",
+      title_pos = "center",
+    })
+  else
+    quickfix_preview.win = vim.api.nvim_open_win(buf, false, {
+      relative = "editor",
+      style = "minimal",
+      border = "rounded",
+      row = row,
+      col = col,
+      width = width,
+      height = height,
+      noautocmd = true,
+      title = " Preview: " .. preview.title .. " ",
+      title_pos = "center",
+    })
+  end
+
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, preview.lines)
+  vim.api.nvim_buf_clear_namespace(buf, quickfix_preview.ns, 0, -1)
+  vim.api.nvim_buf_add_highlight(buf, quickfix_preview.ns, "Visual", preview.target_lnum - 1, 0, -1)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].filetype = preview.filetype
+
+  vim.wo[quickfix_preview.win].wrap = false
+  vim.wo[quickfix_preview.win].number = false
+  vim.wo[quickfix_preview.win].relativenumber = false
+  vim.wo[quickfix_preview.win].signcolumn = "no"
+  vim.wo[quickfix_preview.win].foldcolumn = "0"
+  vim.wo[quickfix_preview.win].cursorline = false
+  vim.api.nvim_win_set_cursor(quickfix_preview.win, { preview.target_lnum, 0 })
+  vim.cmd.redraw()
+  return true
+end
+
 open_file_quickfix = function(files, query, opts)
   opts = opts or {}
+  close_quickfix_preview()
   local items = build_file_quickfix_items(files)
   local title = query == "" and "Files" or ("Files: " .. query)
   local quickfix_open = false
@@ -872,7 +1029,7 @@ function M.clear_highlight()
   end
 end
 
-local function get_quickfix_filename(item)
+get_quickfix_filename = function(item)
   if not item then
     return nil
   end
@@ -918,28 +1075,34 @@ local function cycle_quickfix(step)
     return
   end
 
-  local cmd
   local target_idx
+  local qf_win = get_quickfix_window_id()
+  if qf_win and vim.api.nvim_win_is_valid(qf_win) then
+    local cursor = vim.api.nvim_win_get_cursor(qf_win)
+    if cursor and cursor[1] ~= nil then
+      qf.idx = cursor[1]
+    end
+  end
 
   if step > 0 then
     if qf.idx >= qf.size then
-      cmd = "cfirst"
       target_idx = 1
     else
-      cmd = "cnext"
       target_idx = qf.idx + 1
     end
   else
     if qf.idx <= 1 then
-      cmd = "clast"
       target_idx = qf.size
     else
-      cmd = "cprevious"
       target_idx = qf.idx - 1
     end
   end
 
-  jump_quickfix(cmd, qf.items[target_idx])
+  if not set_quickfix_selection(target_idx, { focus_quickfix = true }) then
+    return
+  end
+
+  preview_quickfix_item(qf.items[target_idx])
 end
 
 local function is_file_search_quickfix(title)
@@ -994,7 +1157,7 @@ local function find_non_quickfix_window()
   return nil
 end
 
-local function get_quickfix_window_id()
+get_quickfix_window_id = function()
   for _, wininfo in ipairs(vim.fn.getwininfo()) do
     if wininfo.quickfix == 1 and wininfo.loclist ~= 1 then
       return wininfo.winid
@@ -1021,7 +1184,8 @@ local function get_selected_quickfix_entry()
   return qf, selected_idx, qf.items[selected_idx], qf_win
 end
 
-local function set_quickfix_selection(target_idx)
+set_quickfix_selection = function(target_idx, opts)
+  opts = opts or {}
   local qf = vim.fn.getqflist({ items = 1, size = 0 })
   local qf_win = get_quickfix_window_id()
 
@@ -1037,11 +1201,15 @@ local function set_quickfix_selection(target_idx)
 
   pcall(vim.fn.setqflist, {}, "a", { idx = target_idx })
   pcall(vim.api.nvim_win_set_cursor, qf_win, { target_idx, 0 })
+  if opts.focus_quickfix and vim.api.nvim_win_is_valid(qf_win) then
+    pcall(vim.api.nvim_set_current_win, qf_win)
+  end
   vim.cmd.redraw()
   return true
 end
 
 local function post_quickfix_open(qf_title, qf_win)
+  close_quickfix_preview()
   if is_file_search_quickfix(qf_title) then
     if qf_win and vim.api.nvim_win_is_valid(qf_win) then
       pcall(vim.api.nvim_win_close, qf_win, true)
@@ -1115,6 +1283,7 @@ end
 function M.show_buffers()
   local prev_win = vim.api.nvim_get_current_win()
   local buffers = vim.fn.getbufinfo({ buflisted = 1 })
+  close_quickfix_preview()
 
   table.sort(buffers, function(a, b)
     if a.lastused ~= b.lastused then
@@ -1161,6 +1330,7 @@ end
 
 function M.toggle_quickfix()
   if is_quickfix_open() then
+    close_quickfix_preview()
     vim.cmd.cclose()
     return
   end
@@ -1200,6 +1370,11 @@ function M.quickfix_select_prev()
   end
 
   return set_quickfix_selection(selected_idx - 1)
+end
+
+function M.close_quickfix()
+  close_quickfix_preview()
+  vim.cmd.cclose()
 end
 
 function M.quickfix_prev()
