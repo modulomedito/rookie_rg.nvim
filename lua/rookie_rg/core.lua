@@ -6,6 +6,10 @@ local default_live_grep_flags = {
   regex = false,
 }
 
+local min_live_file_search_chars = 2
+local max_live_file_search_results = 80
+local max_file_search_results = 200
+
 local function get_live_grep_flags()
   local flags = vim.g.rookie_rg_live_grep_flags
   if type(flags) ~= "table" then
@@ -272,6 +276,10 @@ local function trim_last_char(text)
   return vim.fn.strcharpart(text, 0, char_count - 1)
 end
 
+local function starts_with(text, prefix)
+  return prefix == "" or text:sub(1, #prefix) == prefix
+end
+
 local function read_prompt_key()
   local ok, key = pcall(vim.fn.getcharstr)
   if ok then
@@ -394,6 +402,8 @@ local function prompt_file_search()
   local pattern = ""
   local prompt = open_live_grep_prompt()
   local project_files = get_project_files()
+  local previous_pattern = ""
+  local previous_matches = project_files
 
   if project_files == nil then
     close_live_grep_prompt(prompt)
@@ -405,11 +415,6 @@ local function prompt_file_search()
 
   local ok, result = pcall(function()
     render_file_search_prompt(prompt, pattern)
-    open_file_quickfix(project_files, pattern, {
-      focus_quickfix = false,
-      restore_win = prompt.win,
-      notify_on_empty = false,
-    })
 
     while true do
       local key = read_prompt_key()
@@ -438,12 +443,28 @@ local function prompt_file_search()
         pattern = pattern .. key
       end
 
-      find_files(pattern, {
-        project_files = project_files,
-        focus_quickfix = false,
-        restore_win = prompt.win,
-        notify_on_empty = false,
-      })
+      if vim.fn.strchars(pattern) < min_live_file_search_chars then
+        previous_pattern = ""
+        previous_matches = project_files
+        vim.cmd.cclose()
+      else
+        local source_files = project_files
+        if starts_with(pattern, previous_pattern) and previous_matches ~= nil then
+          source_files = previous_matches
+        end
+
+        local _, matches = find_files(pattern, {
+          project_files = source_files,
+          focus_quickfix = false,
+          restore_win = prompt.win,
+          notify_on_empty = false,
+          max_results = max_live_file_search_results,
+          return_all_matches = true,
+        })
+
+        previous_pattern = pattern
+        previous_matches = matches or project_files
+      end
       render_file_search_prompt(prompt, pattern)
     end
   end)
@@ -559,6 +580,14 @@ open_file_quickfix = function(files, query, opts)
   opts = opts or {}
   local items = build_file_quickfix_items(files)
   local title = query == "" and "Files" or ("Files: " .. query)
+  local quickfix_open = false
+
+  for _, wininfo in ipairs(vim.fn.getwininfo()) do
+    if wininfo.quickfix == 1 and wininfo.loclist ~= 1 then
+      quickfix_open = true
+      break
+    end
+  end
 
   if vim.tbl_isempty(items) then
     vim.fn.setqflist({}, "r", {
@@ -576,7 +605,9 @@ open_file_quickfix = function(files, query, opts)
     title = title,
     items = items,
   })
-  vim.cmd.copen()
+  if not quickfix_open then
+    vim.cmd.copen()
+  end
   if opts.focus_quickfix == false and opts.restore_win and vim.api.nvim_win_is_valid(opts.restore_win) then
     pcall(vim.api.nvim_set_current_win, opts.restore_win)
   end
@@ -593,7 +624,8 @@ find_files = function(query, opts)
   end
 
   if query == "" then
-    return open_file_quickfix(files, query, opts)
+    local success = open_file_quickfix(files, query, opts)
+    return success, files
   end
 
   local matches = {}
@@ -619,16 +651,24 @@ find_files = function(query, opts)
     return a.file < b.file
   end)
 
+  local all_matches = {}
   local files_only = {}
-  local max_results = opts.max_results or 200
+  local max_results = opts.max_results or max_file_search_results
   for i, match in ipairs(matches) do
+    table.insert(all_matches, match.file)
     if i > max_results then
-      break
+      goto continue
     end
     table.insert(files_only, match.file)
+    ::continue::
   end
 
-  return open_file_quickfix(files_only, query, opts)
+  local success = open_file_quickfix(files_only, query, opts)
+  if opts.return_all_matches then
+    return success, all_matches
+  end
+
+  return success, all_matches
 end
 
 local function prioritize_current_line(pattern, flags)

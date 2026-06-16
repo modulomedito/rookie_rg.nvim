@@ -45,6 +45,13 @@ Inside the floating file search prompt:
 
 The file search uses `rg --files --hidden` and fuzzy-matches results in Lua.
 
+Performance notes:
+
+- live preview starts after `2` characters
+- live preview reuses the previous match set when you keep typing
+- live preview caps quickfix updates to the top `80` matches
+- final `Enter` search still allows broader results
+
 ## Quickfix Actions
 
 Inside the quickfix window:
