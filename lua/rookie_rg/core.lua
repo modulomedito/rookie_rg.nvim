@@ -15,6 +15,7 @@ local quickfix_preview = {
   win = nil,
   ns = vim.api.nvim_create_namespace("RookieRgQuickfixPreview"),
 }
+local last_file_search_target_win = nil
 local close_quickfix_preview
 local get_quickfix_filename
 local get_quickfix_window_id
@@ -458,6 +459,7 @@ end
 local function prompt_file_search()
   local pattern = ""
   local prompt = open_live_grep_prompt()
+  last_file_search_target_win = prompt.prev_win
   local project_files = get_project_files()
   local previous_pattern = ""
   local previous_matches = project_files
@@ -1284,7 +1286,17 @@ local function open_selected_quickfix_item(mode)
   if mode == "tabedit" then
     vim.cmd.tabnew()
   else
-    local target_win = find_non_quickfix_window()
+    local target_win = nil
+
+    if is_file_search_quickfix(qf.title)
+      and last_file_search_target_win
+      and vim.api.nvim_win_is_valid(last_file_search_target_win)
+    then
+      target_win = last_file_search_target_win
+    else
+      target_win = find_non_quickfix_window()
+    end
+
     if target_win and vim.api.nvim_win_is_valid(target_win) then
       pcall(vim.api.nvim_set_current_win, target_win)
     end
