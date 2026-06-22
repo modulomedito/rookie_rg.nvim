@@ -624,12 +624,46 @@ local function fuzzy_score(candidate, query)
 end
 
 get_project_files = function()
-  local files = vim.fn.systemlist({ "rg", "--files", "--hidden" })
+  -- Use "." to ensure ripgrep only searches within the current working directory.
+  -- This prevents it from automatically searching from the project root if a .git directory exists in a parent.
+  local files = vim.fn.systemlist({ "rg", "--files", "--hidden", "." })
   if vim.v.shell_error ~= 0 then
-    return nil
+    files = {}
   end
 
-  return files
+  local seen = {}
+  local filtered_files = {}
+
+  -- Process files from ripgrep
+  for _, file in ipairs(files) do
+    -- Remove the "./" prefix if it exists
+    local clean_file = file:gsub("^%./", "")
+    -- Skip paths that go outside the current directory or are absolute
+    if not clean_file:match("^%.%.") and not clean_file:match("^/") and not clean_file:match("^%a:") then
+      if not seen[clean_file] then
+        table.insert(filtered_files, clean_file)
+        seen[clean_file] = true
+      end
+    end
+  end
+
+  -- Also include listed buffers that are in the current directory
+  local cwd = vim.fn.getcwd()
+  local buffers = vim.fn.getbufinfo({ buflisted = 1 })
+  for _, buf in ipairs(buffers) do
+    if buf.name and buf.name ~= "" then
+      local relative_path = vim.fn.fnamemodify(buf.name, ":.")
+      -- Check if the buffer is within the current directory
+      if not relative_path:match("^%.%.") and not relative_path:match("^/") and not relative_path:match("^%a:") then
+        if not seen[relative_path] then
+          table.insert(filtered_files, relative_path)
+          seen[relative_path] = true
+        end
+      end
+    end
+  end
+
+  return filtered_files
 end
 
 local function build_file_quickfix_items(files)
