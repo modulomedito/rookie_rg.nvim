@@ -379,6 +379,10 @@ local function get_prompt_key_action(key)
     return "clear"
   end
 
+  if translated_key == "^V" or translated_key == "<C-V>" then
+    return "paste"
+  end
+
   if translated_key == "<Down>" or translated_key == "^N" or translated_key == "<C-N>" then
     return "select_next"
   end
@@ -439,6 +443,8 @@ local function prompt_live_grep(initial_pattern)
         pattern = trim_last_char(pattern)
       elseif action == "clear" then
         pattern = ""
+      elseif action == "paste" then
+        pattern = pattern .. normalize_prompt_text(vim.fn.getreg("+"))
       elseif action == "append" then
         pattern = pattern .. key
       end
@@ -506,6 +512,9 @@ local function prompt_file_search()
         pattern_changed = true
       elseif action == "clear" then
         pattern = ""
+        pattern_changed = true
+      elseif action == "paste" then
+        pattern = pattern .. normalize_prompt_text(vim.fn.getreg("+"))
         pattern_changed = true
       elseif action == "append" then
         pattern = pattern .. key
